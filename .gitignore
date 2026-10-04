@@ -1,17 +1,30 @@
 # Python cache & logs
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Large clinical/reference datasets (LOCAL ONLY - DO NOT TRACK)
+dataset/faers/
+dataset/PharmGKB/
+dataset/sider/
+
+# Keep processed dataset and dataset documentation
+!dataset/README.md
+!dataset/DATA_SOURCES.md
+!dataset/processed_faers_warfarin.csv
+
+# Outputs & Temp files
 catboost_info/
 *.log
-
-# OS & Temp files
 .DS_Store
 Thumbs.db
 
-# Large Datasets & Archives
-dataset/
-dataset.zip
-*.zip
-*.tar.gz
-*.7z
+# Jupyter
+.ipynb_checkpoints/
+

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ichicsr lang="en">
+    <safetyreport>
+        <safetyreportid>FAERS-SAMPLE-001</safetyreportid>
+        <patient>
+            <patientonsetage>65</patientonsetage>
+            <patientsex>1</patientsex>
+            <drug>
+                <medicinalproduct>WARFARIN SODIUM</medicinalproduct>
+            </drug>
+            <drug>
+                <medicinalproduct>AMIODARONE HYDROCHLORIDE</medicinalproduct>
+            </drug>
+            <reaction>
+                <reactionmeddrapt>GASTROINTESTINAL HAEMORRHAGE</reactionmeddrapt>
+            </reaction>
+        </patient>
+    </safetyreport>
+    <safetyreport>
+        <safetyreportid>FAERS-SAMPLE-002</safetyreportid>
+        <patient>
+            <patientonsetage>58</patientonsetage>
+            <patientsex>2</patientsex>
+            <drug>
+                <medicinalproduct>WARFARIN SODIUM</medicinalproduct>
+            </drug>
+            <drug>
+                <medicinalproduct>METFORMIN</medicinalproduct>
+            </drug>
+            <reaction>
+                <reactionmeddrapt>NAUSEA</reactionmeddrapt>
+            </reaction>
+        </patient>
+    </safetyreport>
+</ichicsr>

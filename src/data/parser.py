@@ -3,19 +3,32 @@ import os
 import glob
 import pandas as pd
 import time
+from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
+
+# Repository-relative root path resolution
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_FAERS_DIR = PROJECT_ROOT / "dataset" / "faers"
+DEFAULT_OUTPUT_CSV = PROJECT_ROOT / "dataset" / "processed_faers_warfarin.csv"
 
 def parse_single_xml(file_path):
     """
     Parses a single FAERS XML file and extracts reports for patients taking Warfarin.
     Returns a list of dictionaries with clinical features and outcomes.
+    
+    Phenotype Extraction Methodology:
+    - Drug Exposures: Uses substring keyword matching against medicinalproduct and activesubstancename.
+    - Outcome Phenotype: Uses string keyword matching against MedDRA Preferred Terms (PTs).
+      Note: This implementation uses direct keyword matching on reported MedDRA PT text rather than
+      formal MedDRA hierarchy (HLT/HLGT/SOC) traversal.
     """
+    file_path = str(file_path)
     print(f"Parsing {os.path.basename(file_path)}...")
     t0 = time.time()
     records = []
     
-    # Pre-define keywords in uppercase for speed
-    nsaid_keywords = ['IBUPROFEN', 'NAPROXEN', 'CELECOXIB', 'DICLOFENAC', 'MELOXICAM', 'KETOPROFEN', 'INDOMETHACIN', 'ASPIRIN']
+    # Non-aspirin NSAID keywords (ASPIRIN removed to prevent overlapping definition with aspirin)
+    nsaid_keywords = ['IBUPROFEN', 'NAPROXEN', 'CELECOXIB', 'DICLOFENAC', 'MELOXICAM', 'KETOPROFEN', 'INDOMETHACIN']
     bleed_keywords = ['BLEED', 'HAEMORRHAGE', 'HEMORRHAGE', 'HEMATOMA', 'HAEMATOMA', 'MELENA', 'MELAENA', 'COAGULOPATHY', 'HEMOPTYSIS', 'HAEMOPTYSIS', 'EPISTAXIS', 'HAEMATURIA', 'HEMATURIA']
     
     try:
@@ -62,7 +75,7 @@ def parse_single_xml(file_path):
                 if has_warfarin:
                     report_id = elem.findtext('safetyreportid', '')
                     
-                    # Age parsing
+                    # Age parsing (handling age units 801: years, 802: months, 803: weeks, 804: days)
                     age_str = patient.findtext('patientonsetage', None)
                     age_unit = patient.findtext('patientonsetageunit', '801')
                     
@@ -81,7 +94,7 @@ def parse_single_xml(file_path):
                         except ValueError:
                             pass
                     
-                    # Gender parsing
+                    # Gender parsing (1: Male, 2: Female)
                     sex_str = patient.findtext('patientsex', None)
                     gender = None
                     if sex_str == '1':
@@ -89,7 +102,7 @@ def parse_single_xml(file_path):
                     elif sex_str == '2':
                         gender = 0.0
                     
-                    # Reaction parsing (bleeding events)
+                    # Reaction parsing (bleeding events via PT keyword matching)
                     has_bleeding = 0
                     reactions = patient.findall('reaction')
                     for react in reactions:
@@ -108,12 +121,12 @@ def parse_single_xml(file_path):
                         'age': age,
                         'gender': gender,
                         'drug_a': 1,  # Warfarin cohort inclusion indicator
-                        'drug_b': has_amiodarone,
-                        'drug_c': has_metformin,
-                        'aspirin': has_aspirin,
-                        'nsaid': has_nsaid,
-                        'num_drugs': len(drugs_list),
-                        'adr_bleeding': has_bleeding
+                        'drug_b': has_amiodarone, # Primary treatment/exposure variable
+                        'drug_c': has_metformin,  # Baseline control medication covariate
+                        'aspirin': has_aspirin,   # Independent Aspirin covariate
+                        'nsaid': has_nsaid,       # Independent non-aspirin NSAID covariate
+                        'num_drugs': len(drugs_list), # Polypharmacy indicator
+                        'adr_bleeding': has_bleeding  # Bleeding outcome variable
                     })
                 
                 elem.clear() # Clear nodes to free memory
@@ -123,27 +136,22 @@ def parse_single_xml(file_path):
     print(f"Finished {os.path.basename(file_path)} in {time.time() - t0:.2f}s (Extracted {len(records)} Warfarin reports)")
     return records
 
-def build_processed_dataset(faers_dir="dataset/faers", output_path="dataset/processed_faers_warfarin.csv"):
+def build_processed_dataset(faers_dir=None, output_path=None):
     """
     Scans the FAERS directories, parses all XML files in parallel,
     aggregates results, cleans missing values, and saves the final CSV.
     """
+    if faers_dir is None:
+        faers_dir = DEFAULT_FAERS_DIR
+    if output_path is None:
+        output_path = DEFAULT_OUTPUT_CSV
+        
+    faers_dir = Path(faers_dir)
+    output_path = Path(output_path)
+    
     t_start = time.time()
     
-    # Find all XML files under faers_dir (checking both nested year-based and flat structures)
-    xml_pattern_nested = os.path.join(faers_dir, "*", "faers_xml_*", "XML", "*.xml")
-    xml_files = glob.glob(xml_pattern_nested)
-    
-    if not xml_files:
-        xml_pattern_flat = os.path.join(faers_dir, "faers_xml_*", "XML", "*.xml")
-        xml_files = glob.glob(xml_pattern_flat)
-        
-    if not xml_files:
-        # Fallback to absolute paths or recursive search if empty
-        xml_files = glob.glob(os.path.join(faers_dir, "**", "*.xml"), recursive=True)
-        # Filter out PDFs and other non-XML files
-        xml_files = [f for f in xml_files if f.endswith('.xml')]
-        
+    xml_files = [str(p) for p in faers_dir.glob("**/*.xml")]
     print(f"Found {len(xml_files)} FAERS XML files to parse.")
     if not xml_files:
         raise FileNotFoundError(f"No FAERS XML files found in {faers_dir}!")
@@ -171,6 +179,7 @@ def build_processed_dataset(faers_dir="dataset/faers", output_path="dataset/proc
         df['gender'] = df['gender'].fillna(mode_gender[0] if len(mode_gender) > 0 else 1.0)
         
     # Save cache
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_path, index=False)
     print(f"Saved processed dataset to {output_path} (Shape: {df.shape}) in {time.time() - t_start:.2f}s")
     return df
@@ -178,28 +187,26 @@ def build_processed_dataset(faers_dir="dataset/faers", output_path="dataset/proc
 def validate_references():
     """
     Validates Warfarin and Amiodarone interactions and side effects
-    using SIDER and PharmGKB references.
+    using SIDER and PharmGKB reference datasets if available locally.
     """
     validations = {}
     
-    # 1. SIDER Check
-    sider_path = r"dataset/sider/meddra_all_se.tsv/meddra_all_se.tsv"
-    sider_names_path = r"dataset/sider/drug_names.tsv"
+    sider_path = PROJECT_ROOT / "dataset" / "sider" / "meddra_all_se.tsv" / "meddra_all_se.tsv"
+    if not sider_path.exists():
+        # Fallback if meddra_all_se.tsv is a direct file
+        sider_path = PROJECT_ROOT / "dataset" / "sider" / "meddra_all_se.tsv"
+        
+    sider_names_path = PROJECT_ROOT / "dataset" / "sider" / "drug_names.tsv"
     
-    if os.path.exists(sider_path) and os.path.exists(sider_names_path):
+    if sider_path.exists() and sider_names_path.exists():
         try:
-            # SIDER names: CID, name
             names_df = pd.read_csv(sider_names_path, sep="\t", header=None, names=['cid', 'name'])
-            # Warfarin flat ID is CID105001396 or CID005001396 (Warfarin name is flat CID105001396 in names)
             warfarin_cids = names_df[names_df['name'].str.contains('warfarin', case=False, na=False)]['cid'].tolist()
             
             if warfarin_cids:
-                # SIDER se columns: flat_cid, stereo_cid, umls_concept, term_type, umls_term, term_name
                 se_df = pd.read_csv(sider_path, sep="\t", header=None, 
                                     names=['flat_cid', 'stereo_cid', 'umls_c', 'type', 'umls_t', 'term_name'])
-                # Filter for Warfarin Flat CIDs and PT term type
                 warfarin_se = se_df[(se_df['flat_cid'].isin(warfarin_cids)) & (se_df['type'] == 'PT')]
-                # Look for bleeding terms
                 bleeding_se = warfarin_se[warfarin_se['term_name'].str.contains('bleed|haemorrhage|hemorrhage|haematoma|hematoma', case=False, na=False)]
                 
                 validations['sider_warfarin_bleeding_terms'] = bleeding_se['term_name'].unique().tolist()
@@ -208,12 +215,10 @@ def validate_references():
             print("SIDER reference validation error:", e)
             validations['sider_error'] = str(e)
             
-    # 2. PharmGKB Check
-    pkgb_path = r"dataset/PharmGKB/relationships/relationships.tsv"
-    if os.path.exists(pkgb_path):
+    pkgb_path = PROJECT_ROOT / "dataset" / "PharmGKB" / "relationships" / "relationships.tsv"
+    if pkgb_path.exists():
         try:
             rel_df = pd.read_csv(pkgb_path, sep="\t")
-            # Look for relationships between Warfarin and CYP/VKORC1 genes
             warfarin_genes = rel_df[
                 ((rel_df['Entity1_name'].str.lower() == 'warfarin') & 
                  (rel_df['Entity2_name'].str.upper().isin(['CYP2C9', 'CYP2C19', 'VKORC1', 'CYP3A4']))) |
@@ -221,7 +226,6 @@ def validate_references():
                  (rel_df['Entity1_name'].str.upper().isin(['CYP2C9', 'CYP2C19', 'VKORC1', 'CYP3A4'])))
             ]
             
-            # Look for relationships between Amiodarone and CYP genes
             amio_genes = rel_df[
                 ((rel_df['Entity1_name'].str.lower() == 'amiodarone') & 
                  (rel_df['Entity2_name'].str.upper().isin(['CYP2C9', 'CYP2D6', 'CYP3A4']))) |
@@ -238,12 +242,8 @@ def validate_references():
     return validations
 
 if __name__ == '__main__':
-    # Test validation
     vals = validate_references()
     print("SIDER validation finds bleeding side effects for Warfarin:", vals.get('sider_warfarin_has_bleeding', False))
     print("SIDER Warfarin bleeding terms:", vals.get('sider_warfarin_bleeding_terms', [])[:5])
     print("PharmGKB Warfarin gene relationships found:", len(vals.get('pkgb_warfarin_gene_relationships', [])))
     print("PharmGKB Amiodarone gene relationships found:", len(vals.get('pkgb_amio_gene_relationships', [])))
-    
-    # Process dataset (Test on a single XML first)
-    # build_processed_dataset()
