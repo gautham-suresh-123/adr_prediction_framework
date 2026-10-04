@@ -1,0 +1,17 @@
+# Python cache & logs
+__pycache__/
+*.py[cod]
+*$py.class
+catboost_info/
+*.log
+
+# OS & Temp files
+.DS_Store
+Thumbs.db
+
+# Large Datasets & Archives
+dataset/
+dataset.zip
+*.zip
+*.tar.gz
+*.7z
